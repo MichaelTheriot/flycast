@@ -107,6 +107,7 @@ static bool boot_to_bios;
 
 static bool devices_need_refresh = false;
 static int device_type[4] = {-1,-1,-1,-1};
+static int MapleExpansionDevicesPrev[2];
 static int astick_deadzone = 0;
 static int trigger_deadzone = 0;
 static bool digital_triggers = false;
@@ -150,7 +151,6 @@ std::mutex relPosMutex;
 s32 mo_x_abs[4];
 s32 mo_y_abs[4];
 
-static bool enable_purupuru = true;
 static u32 vib_stop_time[4];
 static double vib_strength[4];
 static double vib_delta[4];
@@ -418,8 +418,6 @@ static bool set_variable_visibility(void)
 		environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
 		option_display.key = CORE_OPTION_NAME "_force_wince";
 		environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
-		option_display.key = CORE_OPTION_NAME "_enable_purupuru";
-		environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
 		option_display.key = CORE_OPTION_NAME "_per_content_vmus";
 		environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
 		option_display.visible = platformIsDreamcast || settings.platform.isAtomiswave();
@@ -535,6 +533,44 @@ static bool set_variable_visibility(void)
 		option_display.visible = (!autoSkipFrameEnabled || !threadedRenderingEnabled);
 		option_display.key = CORE_OPTION_NAME "_detect_vsync_swap_interval";
 		environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+		updated = true;
+	}
+
+	// Show/hide expansion slots options
+	if (first_run || devices_need_refresh)
+	{
+		for (unsigned i = 0; i < 4; i++)
+		{
+			char key[256];
+			option_display.key = key;
+
+			if (platformIsDreamcast && (config::MapleMainDevices[i] == MDT_SegaController
+					|| config::MapleMainDevices[i] == MDT_LightGun
+					|| config::MapleMainDevices[i] == MDT_TwinStick
+					|| config::MapleMainDevices[i] == MDT_AsciiStick))
+			{
+				option_display.visible = true;
+
+				snprintf(key, sizeof(key), "%s%u%s", CORE_OPTION_NAME "_device_port", i + 1, "_slot1");
+				environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+
+				// Hide expansion slot 2 options for "Light Gun", "Arcade Stick" and "Twin Stick" device types
+				option_display.visible = config::MapleMainDevices[i] == MDT_SegaController;
+
+				snprintf(key, sizeof(key), "%s%u%s", CORE_OPTION_NAME "_device_port", i + 1, "_slot2");
+				environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+			}
+			else // Hide both expansion slot 1 and 2 options for any other device type and for arcade
+			{
+				option_display.visible = false;
+
+				snprintf(key, sizeof(key), "%s%u%s", CORE_OPTION_NAME "_device_port", i + 1, "_slot1");
+				environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+				snprintf(key, sizeof(key), "%s%u%s", CORE_OPTION_NAME "_device_port", i + 1, "_slot2");
+				environ_cb(RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY, &option_display);
+			}
+		}
+
 		updated = true;
 	}
 
@@ -838,25 +874,6 @@ static void update_variables(bool first_startup)
 		}
 	}
 
-	var.key = CORE_OPTION_NAME "_enable_purupuru";
-	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
-	{
-		if (enable_purupuru != (strcmp("enabled", var.value) == 0) && settings.platform.isConsole())
-		{
-			enable_purupuru = strcmp("enabled", var.value) == 0;
-			for (int i = 0; i < MAPLE_PORTS; i++) {
-				if (config::MapleMainDevices[i] == MDT_SegaController)
-					config::MapleExpansionDevices[i][1] = enable_purupuru ? MDT_PurupuruPack : MDT_SegaVMU;
-				else if (config::MapleMainDevices[i] == MDT_LightGun || config::MapleMainDevices[i] == MDT_TwinStick
-						|| config::MapleMainDevices[i] == MDT_AsciiStick)
-					config::MapleExpansionDevices[i][0] = enable_purupuru ? MDT_PurupuruPack : MDT_SegaVMU;
-			}
-
-			if (!first_startup)
-				maple_ReconnectDevices();
-		}
-	}
-
 	var.key = CORE_OPTION_NAME "_analog_stick_deadzone";
 	var.value = NULL;
 	if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
@@ -889,12 +906,65 @@ static void update_variables(bool first_startup)
 	else
 		allow_service_buttons = false;
 
+	bool expansionsHaveChanged = false;
 	char key[256];
 	key[0] = '\0';
 
 	var.key = key ;
 	for (int i = 0 ; i < 4 ; i++)
 	{
+		if (!first_startup && settings.platform.isConsole())
+		{
+			MapleExpansionDevicesPrev[0] = config::MapleExpansionDevices[i][0];
+			MapleExpansionDevicesPrev[1] = config::MapleExpansionDevices[i][1];
+
+			if (config::MapleMainDevices[i] == MDT_SegaController
+					|| config::MapleMainDevices[i] == MDT_LightGun
+					|| config::MapleMainDevices[i] == MDT_TwinStick
+					|| config::MapleMainDevices[i] == MDT_AsciiStick)
+			{
+				snprintf(key, sizeof(key), CORE_OPTION_NAME "_device_port%d_slot1", i + 1);
+
+				if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+				{
+					if (!strcmp("VMU", var.value))
+						config::MapleExpansionDevices[i][0] = MDT_SegaVMU;
+					else if (!strcmp("Purupuru", var.value))
+						config::MapleExpansionDevices[i][0] = MDT_PurupuruPack;
+					else if (!strcmp("None", var.value))
+						config::MapleExpansionDevices[i][0] = MDT_None;
+				}
+
+				// Slot 2 options for "Controller" device type
+				if (config::MapleMainDevices[i] == MDT_SegaController)
+				{
+					snprintf(key, sizeof(key), CORE_OPTION_NAME "_device_port%d_slot2", i + 1);
+
+					if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+					{
+						if (!strcmp("VMU", var.value))
+							config::MapleExpansionDevices[i][1] = MDT_SegaVMU;
+						else if (!strcmp("Purupuru", var.value))
+							config::MapleExpansionDevices[i][1] = MDT_PurupuruPack;
+						else if (!strcmp("None", var.value))
+							config::MapleExpansionDevices[i][1] = MDT_None;
+					}
+				}
+				else // No slot 2 for "Light Gun", "Arcade Stick" and "Twin Stick" device types
+					config::MapleExpansionDevices[i][1] = MDT_None;
+			}
+			else // No slots for the other device types
+			{
+				config::MapleExpansionDevices[i][0] = MDT_None;
+				config::MapleExpansionDevices[i][1] = MDT_None;
+			}
+
+			// Skip the expansions check if devices_need_refresh is true, since it will run maple_ReconnectDevices() anyway
+			if (!devices_need_refresh && (MapleExpansionDevicesPrev[0] != config::MapleExpansionDevices[i][0]
+					|| MapleExpansionDevicesPrev[1] != config::MapleExpansionDevices[i][1]))
+				expansionsHaveChanged = true;
+		}
+
 		lightgun_params[i].offscreen = true;
 		lightgun_params[i].x = 0;
 		lightgun_params[i].y = 0;
@@ -938,7 +1008,8 @@ static void update_variables(bool first_startup)
 
 		snprintf(key, sizeof(key), CORE_OPTION_NAME "_vmu%d_screen_display", i+1);
 
-		if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value && !strcmp("enabled", var.value) )
+		if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value && !strcmp("enabled", var.value) 
+				&& config::MapleExpansionDevices[i][0] == MDT_SegaVMU)
 			vmu_lcd_status[i * 2] = true;
 
 		snprintf(key, sizeof(key), CORE_OPTION_NAME "_vmu%d_screen_position", i+1);
@@ -1019,6 +1090,9 @@ static void update_variables(bool first_startup)
 	}
 
 	set_variable_visibility();
+
+	if (expansionsHaveChanged)
+		maple_ReconnectDevices();
 
 	if (!first_startup)
 	{
@@ -2159,56 +2233,30 @@ void retro_set_controller_port_device(unsigned in_port, unsigned device)
 		{
 			case RETRO_DEVICE_JOYPAD:
 				config::MapleMainDevices[in_port] = MDT_SegaController;
-				if (settings.platform.isConsole()) {
-					config::MapleExpansionDevices[in_port][0] = MDT_SegaVMU;
-					config::MapleExpansionDevices[in_port][1] = enable_purupuru ? MDT_PurupuruPack : MDT_SegaVMU;
-				}
 				break;
 			case RETRO_DEVICE_TWINSTICK:
 			case RETRO_DEVICE_TWINSTICK_SATURN:
 				config::MapleMainDevices[in_port] = MDT_TwinStick;
-				if (settings.platform.isConsole()) {
-					config::MapleExpansionDevices[in_port][0] = enable_purupuru ? MDT_PurupuruPack : MDT_SegaVMU;
-					config::MapleExpansionDevices[in_port][1] = MDT_None;
-				}
 				break;
 			case RETRO_DEVICE_ASCIISTICK:
 				config::MapleMainDevices[in_port] = MDT_AsciiStick;
-				if (settings.platform.isConsole()) {
-					config::MapleExpansionDevices[in_port][0] = enable_purupuru ? MDT_PurupuruPack : MDT_SegaVMU;
-					config::MapleExpansionDevices[in_port][1] = MDT_None;
-				}
 				break;
 			case RETRO_DEVICE_KEYBOARD:
 				config::MapleMainDevices[in_port] = MDT_Keyboard;
-				if (settings.platform.isConsole()) {
-					config::MapleExpansionDevices[in_port][0] = MDT_None;
-					config::MapleExpansionDevices[in_port][1] = MDT_None;
-				}
 				break;
 			case RETRO_DEVICE_MOUSE:
 				config::MapleMainDevices[in_port] = MDT_Mouse;
-				if (settings.platform.isConsole()) {
-					config::MapleExpansionDevices[in_port][0] = MDT_None;
-					config::MapleExpansionDevices[in_port][1] = MDT_None;
-				}
 				break;
 			case RETRO_DEVICE_LIGHTGUN:
 			case RETRO_DEVICE_POINTER:
 				config::MapleMainDevices[in_port] = MDT_LightGun;
-				if (settings.platform.isConsole()) {
-					config::MapleExpansionDevices[in_port][0] = enable_purupuru ? MDT_PurupuruPack : MDT_SegaVMU;
-					config::MapleExpansionDevices[in_port][1] = MDT_None;
-				}
 				break;
 			default:
 				config::MapleMainDevices[in_port] = MDT_None;
-				if (settings.platform.isConsole()) {
-					config::MapleExpansionDevices[in_port][0] = MDT_None;
-					config::MapleExpansionDevices[in_port][1] = MDT_None;
-				}
 				break;
 		}
+
+		update_variables(false);
 	}
 }
 
