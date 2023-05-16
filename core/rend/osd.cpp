@@ -192,7 +192,7 @@ void push_vmu_screen(int bus_id, int bus_port, u8* buffer)
 #ifndef LIBRETRO
 	vmu_lcd_status[vmu_id] = true;
 #endif
-	vmu_lcd_changed[vmu_id] = true;
+	vmu_lcd_changed[vmu_id] = ~config::HideVMUs >> (vmu_id * 2);
 }
 
 static const int lightgunCrosshairData[16 * 16] =

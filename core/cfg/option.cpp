@@ -79,6 +79,7 @@ Option<bool> DumpTextures("rend.DumpTextures");
 Option<int> ScreenStretching("rend.ScreenStretching", 100);
 Option<bool> Fog("rend.Fog", true);
 Option<bool> FloatVMUs("rend.FloatVMUs");
+Option<uint8_t> HideVMUs("rend.HideVMUs");
 Option<bool> Rotate90("rend.Rotate90");
 Option<bool> PerStripSorting("rend.PerStripSorting");
 #ifdef __APPLE__
